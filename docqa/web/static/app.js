@@ -123,13 +123,18 @@ async function refreshWatcher() {
   try {
     const response = await fetch('/api/watcher'); const state = await response.json();
     const node = $('#watcher-status'); node.className = `watcher-status ${state.state}`;
+    const libraryNode = $('#library-watcher'); libraryNode.className = `watcher-status ${state.state}`;
     const label = state.state === 'disabled' ? '目录监控已关闭'
       : state.state === 'indexing' ? `正在增量导入：${state.current_file || '文档'}`
       : state.state === 'error' ? `监控遇到错误：${state.last_error || '请检查目录'}`
       : `目录监控中 · ${state.files_seen} 个文件 · 已新增 ${state.indexed} 份`;
     node.querySelector('span').textContent = label;
+    libraryNode.querySelector('span').textContent = label;
     node.title = `本地收件目录：${state.directory}${state.last_scan ? `\n最近扫描：${state.last_scan}` : ''}`;
-  } catch { $('#watcher-status').querySelector('span').textContent = '目录监控状态暂不可用'; }
+  } catch {
+    $('#watcher-status').querySelector('span').textContent = '目录监控状态暂不可用';
+    $('#library-watcher').querySelector('span').textContent = '目录监控状态暂不可用';
+  }
 }
 
 async function refreshDocuments() {
@@ -138,13 +143,32 @@ async function refreshDocuments() {
     const docs = await response.json(); cachedDocuments = docs;
     $('#doc-count').textContent = docs.length;
     $('#chunk-count').textContent = docs.reduce((sum, doc) => sum + doc.chunks, 0);
+    $('#nav-count').textContent = docs.length;
+    $('#library-count').textContent = docs.length;
+    $('#ask-doc-count').textContent = docs.length;
+    const overview = $('#overview-documents'); overview.replaceChildren();
+    if (!docs.length) {
+      const emptyRecent = document.createElement('div'); emptyRecent.className = 'overview-empty';
+      emptyRecent.textContent = '添加文档后，最近入库的资料会显示在这里。'; overview.append(emptyRecent);
+    } else {
+      docs.slice(0, 4).forEach((doc) => {
+        const row = document.createElement('button'); row.type = 'button'; row.className = 'overview-doc-row';
+        const ext = doc.name.split('.').pop().toLowerCase();
+        const glyph = document.createElement('span'); glyph.className = `doc-glyph ${ext}`; glyph.textContent = ext.toUpperCase();
+        const info = document.createElement('span'); info.className = 'overview-doc-info';
+        const name = document.createElement('b'); name.textContent = doc.name;
+        const meta = document.createElement('small'); meta.textContent = `${doc.category} · ${doc.pages} 页 · ${doc.chunks} 个片段`;
+        const arrow = document.createElement('span'); arrow.className = 'overview-arrow'; arrow.textContent = '↗';
+        info.append(name, meta); row.append(glyph, info, arrow); row.addEventListener('click', () => showDocumentImages(doc)); overview.append(row);
+      });
+    }
     const empty = document.querySelector('.empty-library');
     empty.style.display = docs.length ? 'none' : 'flex';
     const list = $('#document-list'); list.replaceChildren();
     const filter = $('#document-filter').value;
     const visibleDocs = docs.filter((doc) => filter === '全部' || doc.category === filter);
     if (docs.length && !visibleDocs.length) { const note = document.createElement('div'); note.className = 'filter-empty'; note.textContent = '这个分类暂时没有文档。'; list.append(note); }
-    visibleDocs.slice(0, 5).forEach((doc) => {
+    visibleDocs.forEach((doc) => {
       const row = document.createElement('div'); row.className = 'doc-row';
       const ext = doc.name.split('.').pop().toLowerCase();
       const glyph = document.createElement('span'); glyph.className = `doc-glyph ${ext}`; glyph.textContent = ext.toUpperCase();
@@ -246,7 +270,25 @@ async function refreshEvaluationCases() {
   } catch { $('#evaluation-count').textContent = '评估接口暂不可用'; }
 }
 
-function setQuestion(question) { $('#question').value = question; $('#question').focus(); document.querySelector('#ask').scrollIntoView({behavior:'smooth',block:'center'}); }
+const pageTitles = {home:'知识概览',library:'我的文档',ask:'智能问答',retrieval:'检索实验室'};
+function navigateToPage() {
+  const requested = location.hash.slice(1);
+  const route = Object.hasOwn(pageTitles, requested) ? requested : 'home';
+  document.querySelectorAll('.app-page').forEach((page) => page.classList.toggle('active', page.dataset.page === route));
+  document.querySelectorAll('.nav-item').forEach((item) => {
+    const active = item.dataset.route === route;
+    item.classList.toggle('active', active);
+    if (active) item.setAttribute('aria-current', 'page'); else item.removeAttribute('aria-current');
+  });
+  $('#breadcrumb-title').textContent = pageTitles[route];
+  document.title = `${pageTitles[route]} · 知序`;
+}
+window.addEventListener('hashchange', navigateToPage);
+function setQuestion(question) {
+  $('#question').value = question;
+  if (location.hash !== '#ask') location.hash = 'ask';
+  navigateToPage(); $('#question').focus();
+}
 document.querySelectorAll('[data-question]').forEach((button) => button.addEventListener('click', () => setQuestion(button.dataset.question)));
 $('#upload-trigger').addEventListener('click', () => $('#file-input').click());
 $('#empty-upload').addEventListener('click', () => $('#file-input').click());
@@ -366,4 +408,6 @@ refreshHealth();
 refreshDocuments();
 refreshEvaluationCases();
 refreshWatcher();
+if (!location.hash) location.hash = 'home';
+navigateToPage();
 setInterval(refreshWatcher, 8000);
