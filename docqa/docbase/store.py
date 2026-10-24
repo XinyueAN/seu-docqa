@@ -31,8 +31,20 @@ def connect() -> sqlite3.Connection:
         id TEXT PRIMARY KEY, document_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
         name TEXT NOT NULL, page INTEGER NOT NULL, path TEXT NOT NULL, caption TEXT NOT NULL DEFAULT ''
       );
+      CREATE TABLE IF NOT EXISTS chat_sessions (
+        id TEXT PRIMARY KEY, title TEXT NOT NULL DEFAULT '新对话',
+        created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%f','now')),
+        updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%f','now'))
+      );
+      CREATE TABLE IF NOT EXISTS chat_messages (
+        id TEXT PRIMARY KEY, session_id TEXT NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
+        position INTEGER NOT NULL, role TEXT NOT NULL CHECK(role IN ('user','assistant')), content TEXT NOT NULL,
+        citations TEXT NOT NULL DEFAULT '[]', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(session_id,position)
+      );
       CREATE INDEX IF NOT EXISTS idx_chunks_document ON chunks(document_id);
       CREATE INDEX IF NOT EXISTS idx_images_document ON images(document_id);
+      CREATE INDEX IF NOT EXISTS idx_chat_messages_session ON chat_messages(session_id, created_at);
     """)
     columns = {row[1] for row in db.execute("PRAGMA table_info(chunks)").fetchall()}
     document_columns = {row[1] for row in db.execute("PRAGMA table_info(documents)").fetchall()}
@@ -132,3 +144,51 @@ def update_category(document_id: str, category: str) -> bool:
     with db_session() as db:
         result = db.execute("UPDATE documents SET category=? WHERE id=?", (category, document_id))
     return result.rowcount > 0
+
+
+def create_chat_session(title: str = "新对话") -> dict:
+    import uuid
+    session_id = uuid.uuid4().hex
+    with db_session() as db:
+        db.execute("INSERT INTO chat_sessions(id,title) VALUES(?,?)", (session_id, title[:80]))
+        row = db.execute("SELECT id,title,created_at,updated_at FROM chat_sessions WHERE id=?", (session_id,)).fetchone()
+    return dict(row)
+
+
+def list_chat_sessions() -> list[dict]:
+    with db_session() as db:
+        rows = db.execute("""
+          SELECT s.id,s.title,s.created_at,s.updated_at,
+            (SELECT COUNT(*) FROM chat_messages m WHERE m.session_id=s.id) message_count
+          FROM chat_sessions s ORDER BY s.updated_at DESC,s.created_at DESC
+        """).fetchall()
+    return [dict(row) for row in rows]
+
+
+def get_chat_session(session_id: str) -> dict | None:
+    with db_session() as db:
+        row = db.execute("SELECT id,title,created_at,updated_at FROM chat_sessions WHERE id=?", (session_id,)).fetchone()
+    return dict(row) if row else None
+
+
+def list_chat_messages(session_id: str) -> list[dict]:
+    with db_session() as db:
+        rows = db.execute("SELECT id,role,content,citations,created_at FROM chat_messages WHERE session_id=? ORDER BY position", (session_id,)).fetchall()
+    result = [dict(row) for row in rows]
+    for item in result:
+        item["citations"] = json.loads(item["citations"] or "[]")
+    return result
+
+
+def save_chat_turn(session_id: str, question: str, answer: str, citations: list[dict]) -> None:
+    import uuid
+    with db_session() as db:
+        count = db.execute("SELECT COUNT(*) FROM chat_messages WHERE session_id=?", (session_id,)).fetchone()[0]
+        if count == 0:
+            title = " ".join(question.split())[:42]
+            if len(question) > 42:
+                title += "…"
+            db.execute("UPDATE chat_sessions SET title=? WHERE id=?", (title or "新对话", session_id))
+        db.execute("INSERT INTO chat_messages(id,session_id,position,role,content) VALUES(?,?,?,?,?)", (uuid.uuid4().hex, session_id, count + 1, "user", question))
+        db.execute("INSERT INTO chat_messages(id,session_id,position,role,content,citations) VALUES(?,?,?,?,?,?)", (uuid.uuid4().hex, session_id, count + 2, "assistant", answer, json.dumps(citations, ensure_ascii=False)))
+        db.execute("UPDATE chat_sessions SET updated_at=strftime('%Y-%m-%d %H:%M:%f','now') WHERE id=?", (session_id,))

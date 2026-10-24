@@ -16,8 +16,8 @@ from docqa.config import settings
 from docqa.agent.answer import answer_question
 from docqa.doc2md.parser import parse_document, to_markdown
 from docqa.docbase.embeddings import embed_texts, model_status
-from docqa.docbase.store import all_chunks, db_session, delete_document as remove_document, get_document_by_hash, get_image, list_documents, list_images, save_document, save_images, update_category, update_embeddings
-from docqa.models import CategoryUpdate, ChatRequest, ChatResponse, EvaluationCaseCreate
+from docqa.docbase.store import all_chunks, create_chat_session, db_session, delete_document as remove_document, get_chat_session, get_document_by_hash, get_image, list_chat_messages, list_chat_sessions, list_documents, list_images, save_chat_turn, save_document, save_images, update_category, update_embeddings
+from docqa.models import CategoryUpdate, ChatRequest, ChatResponse, ConversationCreate, EvaluationCaseCreate
 from docqa.service.llm import ModelNotConfigured
 from docqa.service.evaluation import add_case, cases as evaluation_cases, evaluate as run_evaluation, remove_case
 from docqa.service.watcher import status as watcher_status, watch_directory
@@ -330,13 +330,39 @@ async def image_file(image_id: str) -> FileResponse:
     return FileResponse(image["path"], media_type="image/jpeg")
 
 
+@app.get("/api/conversations")
+async def conversations() -> list[dict]:
+    return list_chat_sessions()
+
+
+@app.post("/api/conversations")
+async def new_conversation(request: ConversationCreate | None = None) -> dict:
+    title = request.title if request else "新对话"
+    return create_chat_session(title)
+
+
+@app.get("/api/conversations/{conversation_id}")
+async def conversation(conversation_id: str) -> dict:
+    session = get_chat_session(conversation_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="会话不存在。")
+    return {**session, "messages": list_chat_messages(conversation_id)}
+
+
 @app.post("/api/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest) -> ChatResponse:
+    session = get_chat_session(request.conversation_id) if request.conversation_id else None
+    if request.conversation_id and session is None:
+        raise HTTPException(status_code=404, detail="会话不存在，请新建会话后重试。")
+    if session is None:
+        session = create_chat_session()
+    history = list_chat_messages(session["id"])
     try:
-        answer, citations = await answer_question(request.question)
+        answer, citations = await answer_question(request.question, history)
     except ModelNotConfigured as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except Exception as exc:
         # Do not return exception details: HTTP client errors can contain sensitive request data.
         raise HTTPException(status_code=502, detail="DeepSeek 服务暂时不可用，请检查网络与模型配置。") from exc
-    return ChatResponse(answer=answer, citations=citations, model=settings.model)
+    save_chat_turn(session["id"], request.question, answer, citations)
+    return ChatResponse(answer=answer, citations=citations, model=settings.model, conversation_id=session["id"])

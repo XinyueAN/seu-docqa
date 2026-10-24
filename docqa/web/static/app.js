@@ -1,8 +1,10 @@
 const $ = (selector) => document.querySelector(selector);
 const toast = (message) => { const node = $('#toast'); node.textContent = message; node.classList.add('visible'); setTimeout(() => node.classList.remove('visible'), 3000); };
 let cachedDocuments = [];
+let activeConversationId = null;
+let conversationLoadToken = 0;
 
-function appendInline(parent, text) {
+function appendInline(parent, text, onCitation = null) {
   const tokenPattern = /(\*\*[^*]+\*\*|`[^`]+`|\[S\d+\])/g;
   let cursor = 0;
   for (const match of text.matchAll(tokenPattern)) {
@@ -10,13 +12,13 @@ function appendInline(parent, text) {
     const value = match[0]; let node;
     if (value.startsWith('**')) { node = document.createElement('strong'); node.textContent = value.slice(2, -2); }
     else if (value.startsWith('`')) { node = document.createElement('code'); node.textContent = value.slice(1, -1); }
-    else { node = document.createElement('button'); node.type = 'button'; node.className = 'citation-ref'; node.textContent = value; node.addEventListener('click', () => document.getElementById(`citation-${value.slice(1, -1)}`)?.scrollIntoView({behavior:'smooth',block:'center'})); }
+    else { node = document.createElement('button'); node.type = 'button'; node.className = 'citation-ref'; node.textContent = value; node.addEventListener('click', () => onCitation ? onCitation(value.slice(1, -1)) : document.getElementById(`citation-${value.slice(1, -1)}`)?.scrollIntoView({behavior:'smooth',block:'center'})); }
     parent.append(node); cursor = match.index + value.length;
   }
   parent.append(document.createTextNode(text.slice(cursor)));
 }
 
-function appendMarkdown(parent, text) {
+function appendMarkdown(parent, text, onCitation = null) {
   const lines = text.split('\n'); let list = null;
   for (let index = 0; index < lines.length; index++) {
     const rawLine = lines[index];
@@ -27,23 +29,23 @@ function appendMarkdown(parent, text) {
       list = null;
       const cells = (value) => value.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map((cell) => cell.trim());
       const table = document.createElement('table'); const thead = document.createElement('thead'); const headerRow = document.createElement('tr');
-      cells(line).forEach((value) => { const th = document.createElement('th'); appendInline(th, value); headerRow.append(th); });
+      cells(line).forEach((value) => { const th = document.createElement('th'); appendInline(th, value, onCitation); headerRow.append(th); });
       thead.append(headerRow); table.append(thead); const tbody = document.createElement('tbody'); index += 2;
       while (index < lines.length && lines[index].includes('|')) {
-        const row = document.createElement('tr'); cells(lines[index]).forEach((value) => { const td = document.createElement('td'); appendInline(td, value); row.append(td); }); tbody.append(row); index++;
+        const row = document.createElement('tr'); cells(lines[index]).forEach((value) => { const td = document.createElement('td'); appendInline(td, value, onCitation); row.append(td); }); tbody.append(row); index++;
       }
       index--; table.append(tbody); parent.append(table); continue;
     }
     const heading = /^(#{1,4})\s+(.+)$/.exec(line);
-    if (heading) { list = null; const node = document.createElement(`h${Math.min(heading[1].length + 2, 6)}`); appendInline(node, heading[2]); parent.append(node); continue; }
+    if (heading) { list = null; const node = document.createElement(`h${Math.min(heading[1].length + 2, 6)}`); appendInline(node, heading[2], onCitation); parent.append(node); continue; }
     const unordered = /^\s*[-*]\s+(.+)$/.exec(line);
     const ordered = /^\s*\d+[.)]\s+(.+)$/.exec(line);
     if (unordered || ordered) {
       const tag = unordered ? 'ul' : 'ol';
       if (!list || list.tagName.toLowerCase() !== tag) { list = document.createElement(tag); parent.append(list); }
-      const item = document.createElement('li'); appendInline(item, (unordered || ordered)[1]); list.append(item); continue;
+      const item = document.createElement('li'); appendInline(item, (unordered || ordered)[1], onCitation); list.append(item); continue;
     }
-    list = null; const paragraph = document.createElement('p'); appendInline(paragraph, line); parent.append(paragraph);
+    list = null; const paragraph = document.createElement('p'); appendInline(paragraph, line, onCitation); parent.append(paragraph);
   }
 }
 
@@ -90,15 +92,15 @@ function renderMermaid(parent, source) {
   const wrapper=document.createElement('div');wrapper.className='mermaid-diagram';wrapper.append(svg);parent.append(wrapper);
 }
 
-function renderAnswer(parent, text) {
+function renderAnswer(parent, text, onCitation = null) {
   parent.replaceChildren(); const codePattern=/```([\w-]*)\s*\n([\s\S]*?)```/g; let cursor=0;
   for(const match of text.matchAll(codePattern)){
-    appendMarkdown(parent,text.slice(cursor,match.index));
+    appendMarkdown(parent,text.slice(cursor,match.index),onCitation);
     if(match[1].toLowerCase()==='mermaid') renderMermaid(parent,match[2]);
     else {const pre=document.createElement('pre');const code=document.createElement('code');code.textContent=match[2];pre.append(code);parent.append(pre);}
     cursor=match.index+match[0].length;
   }
-  appendMarkdown(parent,text.slice(cursor));
+  appendMarkdown(parent,text.slice(cursor),onCitation);
 }
 
 async function refreshHealth() {
@@ -145,7 +147,6 @@ async function refreshDocuments() {
     $('#chunk-count').textContent = docs.reduce((sum, doc) => sum + doc.chunks, 0);
     $('#nav-count').textContent = docs.length;
     $('#library-count').textContent = docs.length;
-    $('#ask-doc-count').textContent = docs.length;
     const overview = $('#overview-documents'); overview.replaceChildren();
     if (!docs.length) {
       const emptyRecent = document.createElement('div'); emptyRecent.className = 'overview-empty';
@@ -270,6 +271,100 @@ async function refreshEvaluationCases() {
   } catch { $('#evaluation-count').textContent = '评估接口暂不可用'; }
 }
 
+function renderEvidence(citations = []) {
+  const list = $('#evidence-list'); list.replaceChildren();
+  $('#evidence-subtitle').textContent = citations.length ? `本轮命中 ${citations.length} 条来源` : '回答来源会显示在这里';
+  if (!citations.length) {
+    const empty = document.createElement('div'); empty.className = 'evidence-empty';
+    const icon = document.createElement('span'); icon.textContent = '◌';
+    const title = document.createElement('b'); title.textContent = '暂无检索证据';
+    const text = document.createElement('p'); text.textContent = '当前回答没有引用到可展示的文档片段。'; empty.append(icon, title, text); list.append(empty); return;
+  }
+  citations.forEach((citation) => {
+    const card = document.createElement('article'); card.className = 'evidence-card'; card.id = `citation-${citation.id}`;
+    const label = document.createElement('span'); label.className = 'evidence-source-label'; label.textContent = citation.id;
+    const heading = document.createElement('b'); heading.textContent = citation.document;
+    const page = document.createElement('small'); page.textContent = `第 ${citation.page} 页`;
+    const excerpt = document.createElement('p'); excerpt.textContent = citation.excerpt;
+    const top = document.createElement('div'); top.className = 'evidence-card-head'; top.append(label, page);
+    card.append(top, heading, excerpt);
+    if (citation.image_url) { const image = document.createElement('img'); image.src = citation.image_url; image.alt = `${citation.document} 第 ${citation.page} 页相关图片`; image.loading = 'lazy'; card.append(image); }
+    list.append(card);
+  });
+}
+
+function appendChatMessage(message) {
+  const row = document.createElement('article'); row.className = `chat-message ${message.role}`;
+  const avatar = document.createElement('div'); avatar.className = 'message-avatar'; avatar.textContent = message.role === 'assistant' ? '知' : '我';
+  const body = document.createElement('div'); body.className = 'message-body';
+  const label = document.createElement('div'); label.className = 'message-label'; label.textContent = message.role === 'assistant' ? '知序' : '你';
+  const content = document.createElement('div'); content.className = 'message-content';
+  if (message.role === 'assistant') {
+    renderAnswer(content, message.content, (citationId) => {
+      renderEvidence(message.citations || []);
+      requestAnimationFrame(() => document.getElementById(`citation-${citationId}`)?.scrollIntoView({behavior:'smooth',block:'center'}));
+    });
+    const actions = document.createElement('div'); actions.className = 'message-actions';
+    const sourceButton = document.createElement('button'); sourceButton.type = 'button'; sourceButton.className = 'source-action';
+    sourceButton.textContent = message.citations?.length ? `⌕ 查看本轮 ${message.citations.length} 条证据` : '⌕ 本轮无引用来源';
+    sourceButton.disabled = !message.citations?.length;
+    sourceButton.addEventListener('click', () => renderEvidence(message.citations || [])); actions.append(sourceButton); body.append(label, content, actions);
+  } else { appendMarkdown(content, message.content); body.append(label, content); }
+  row.append(avatar, body); $('#chat-thread').append(row); return row;
+}
+
+async function loadConversation(conversationId) {
+  const token = ++conversationLoadToken;
+  activeConversationId = conversationId;
+  try {
+    const response = await fetch(`/api/conversations/${encodeURIComponent(conversationId)}`); const data = await response.json();
+    if (!response.ok) throw new Error(data.detail || '无法读取会话');
+    if (token !== conversationLoadToken) return;
+    $('#active-conversation-title').textContent = data.title;
+    $('#chat-thread').replaceChildren();
+    $('#chat-welcome').hidden = data.messages.length > 0;
+    data.messages.forEach(appendChatMessage);
+    const lastAnswer = [...data.messages].reverse().find((message) => message.role === 'assistant');
+    renderEvidence(lastAnswer?.citations || []);
+    document.querySelectorAll('.conversation-item').forEach((item) => item.classList.toggle('active', item.dataset.conversationId === conversationId));
+    $('#chat-scroll').scrollTop = $('#chat-scroll').scrollHeight;
+  } catch (error) { toast(error.message || '无法读取会话'); }
+}
+
+async function refreshConversations(preferredId = null) {
+  try {
+    const response = await fetch('/api/conversations'); const sessions = await response.json();
+    if (!response.ok) throw new Error('无法读取会话列表');
+    const list = $('#conversation-list'); list.replaceChildren();
+    if (!sessions.length) {
+      const empty = document.createElement('div'); empty.className = 'session-empty'; empty.textContent = '还没有历史对话'; list.append(empty);
+      const created = await fetch('/api/conversations', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({})});
+      const session = await created.json(); if (!created.ok) throw new Error(session.detail || '无法新建对话');
+      return refreshConversations(session.id);
+    }
+    sessions.forEach((session) => {
+      const item = document.createElement('button'); item.type = 'button'; item.className = 'conversation-item'; item.dataset.conversationId = session.id;
+      const title = document.createElement('b'); title.textContent = session.title;
+      const meta = document.createElement('small'); meta.textContent = session.message_count ? `${Math.ceil(session.message_count / 2)} 轮对话` : '尚未开始';
+      const icon = document.createElement('span'); icon.className = 'conversation-item-icon'; icon.textContent = '▤';
+      item.append(icon, title, meta); item.addEventListener('click', () => loadConversation(session.id)); list.append(item);
+    });
+    const nextId = preferredId && sessions.some((session) => session.id === preferredId) ? preferredId
+      : sessions.some((session) => session.id === activeConversationId) ? activeConversationId : sessions[0].id;
+    await loadConversation(nextId);
+  } catch (error) { toast(error.message || '会话服务暂不可用'); }
+}
+
+async function startNewConversation() {
+  const button = $('#new-chat'); button.disabled = true;
+  try {
+    const response = await fetch('/api/conversations', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({})});
+    const session = await response.json(); if (!response.ok) throw new Error(session.detail || '新建对话失败');
+    await refreshConversations(session.id); $('#question').focus();
+  } catch (error) { toast(error.message || '新建对话失败'); }
+  finally { button.disabled = false; }
+}
+
 const pageTitles = {home:'知识概览',library:'我的文档',ask:'智能问答',retrieval:'检索实验室'};
 function navigateToPage() {
   const requested = location.hash.slice(1);
@@ -290,6 +385,7 @@ function setQuestion(question) {
   navigateToPage(); $('#question').focus();
 }
 document.querySelectorAll('[data-question]').forEach((button) => button.addEventListener('click', () => setQuestion(button.dataset.question)));
+$('#new-chat').addEventListener('click', startNewConversation);
 $('#upload-trigger').addEventListener('click', () => $('#file-input').click());
 $('#empty-upload').addEventListener('click', () => $('#file-input').click());
 $('#document-filter').addEventListener('change', () => refreshDocuments());
@@ -376,30 +472,37 @@ $('#file-input').addEventListener('change', (event) => {
     event.target.value = '';
   })();
 });
+$('#question').addEventListener('keydown', (event) => {
+  if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); $('#ask-form').requestSubmit(); }
+});
 $('#ask-form').addEventListener('submit', async (event) => {
   event.preventDefault();
   const question = $('#question').value.trim();
   if (!question) return;
   const submit = event.currentTarget.querySelector('button[type="submit"]');
   submit.disabled = true; submit.textContent = '…';
-  $('#answer-box').hidden = false; $('#answer-text').textContent = '正在整理思路…';
+  $('#chat-welcome').hidden = true;
+  appendChatMessage({role:'user',content:question});
+  const pending = document.createElement('article'); pending.className = 'chat-message assistant pending-message';
+  const pendingAvatar = document.createElement('div'); pendingAvatar.className = 'message-avatar'; pendingAvatar.textContent = '知';
+  const pendingText = document.createElement('div'); pendingText.className = 'pending-content'; pendingText.textContent = '正在检索资料并整理回答…';
+  pending.append(pendingAvatar,pendingText); $('#chat-thread').append(pending); $('#chat-scroll').scrollTop = $('#chat-scroll').scrollHeight;
+  $('#question').value = '';
   try {
-    const response = await fetch('/api/chat', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({question})});
+    if (!activeConversationId) {
+      const created = await fetch('/api/conversations', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({})});
+      const session = await created.json(); if (!created.ok) throw new Error(session.detail || '无法创建会话'); activeConversationId = session.id;
+    }
+    const response = await fetch('/api/chat', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({question,conversation_id:activeConversationId})});
     const payload = await response.json();
     if (!response.ok) throw new Error(payload.detail || '暂时无法完成请求。');
-    renderAnswer($('#answer-text'), payload.answer);
-    const citations = $('#citation-list'); citations.replaceChildren();
-    payload.citations.forEach((citation) => {
-      const card = document.createElement('div'); card.className = 'citation-card';
-      card.id = `citation-${citation.id}`;
-      const heading = document.createElement('b'); heading.textContent = `[${citation.id}] ${citation.document} · 第 ${citation.page} 页`;
-      const excerpt = document.createElement('small'); excerpt.textContent = citation.excerpt;
-      card.append(heading, excerpt);
-      if (citation.image_url) { const image = document.createElement('img'); image.src = citation.image_url; image.alt = `${citation.document} 第 ${citation.page} 页的相关图片`; card.append(image); }
-      citations.append(card);
-    });
+    activeConversationId = payload.conversation_id || activeConversationId;
+    pending.remove(); appendChatMessage({role:'assistant',content:payload.answer,citations:payload.citations});
+    renderEvidence(payload.citations); $('#chat-scroll').scrollTop = $('#chat-scroll').scrollHeight;
+    await refreshConversations(activeConversationId);
   } catch (error) {
-    $('#answer-text').textContent = error.message;
+    pending.remove(); appendChatMessage({role:'assistant',content:`暂时无法完成回答：${error.message}`,citations:[]});
+    renderEvidence([]); $('#chat-scroll').scrollTop = $('#chat-scroll').scrollHeight;
   } finally {
     submit.disabled = false; submit.textContent = '↑';
   }
@@ -408,6 +511,7 @@ refreshHealth();
 refreshDocuments();
 refreshEvaluationCases();
 refreshWatcher();
+refreshConversations();
 if (!location.hash) location.hash = 'home';
 navigateToPage();
 setInterval(refreshWatcher, 8000);

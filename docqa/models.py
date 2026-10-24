@@ -5,12 +5,18 @@ from pydantic import BaseModel, Field
 
 class ChatRequest(BaseModel):
     question: str = Field(min_length=1, max_length=8000)
+    conversation_id: str | None = None
 
 
 class ChatResponse(BaseModel):
     answer: str
     citations: list[dict] = Field(default_factory=list)
     model: str
+    conversation_id: str | None = None
+
+
+class ConversationCreate(BaseModel):
+    title: str = Field(default="新对话", min_length=1, max_length=80)
 
 
 class DocumentSummary(BaseModel):

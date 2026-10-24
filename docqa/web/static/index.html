@@ -14,6 +14,9 @@
   <link rel="stylesheet" href="/static/answer.css" />
   <link rel="stylesheet" href="/static/settings.css" />
   <link rel="stylesheet" href="/static/preview.css" />
+  <link rel="stylesheet" href="/static/chat.css?v=20261024-2" />
+  <link rel="stylesheet" href="/static/chat-responsive.css?v=20261024-1" />
+  <link rel="stylesheet" href="/static/chat-tables.css?v=20261024-1" />
   <link rel="stylesheet" href="/static/pages.css?v=20261024-1" />
 </head>
 <body>
@@ -50,9 +53,13 @@
         </article>
       </section>
 
-      <section class="app-page" id="page-ask" data-page="ask">
-        <div class="page-intro"><div><div class="section-kicker">ASK YOUR DOCUMENTS</div><h1>智能问答</h1><p>基于你的本地文档获取答案，每条结论都尽量附上可核验的来源。</p></div><div class="page-decoration ask-decoration">✳</div></div>
-        <div class="ask-layout"><article class="panel ask-panel"><div class="panel-heading"><div><div class="section-kicker">DOCUMENT ASSISTANT</div><h2>今天想了解什么？</h2></div><span class="online-badge"><i></i> AI 就绪</span></div><p class="ask-hint">选择一个问题作为起点，或在下方输入你自己的问题。</p><div class="suggestions"><button class="suggestion" data-question="帮我总结最近添加的文档"><span class="suggestion-icon lilac">✧</span><span><b>总结重点</b><small>帮我总结最近添加的文档</small></span><span class="suggestion-arrow">↗</span></button><button class="suggestion" data-question="文档里提到的关键流程是什么？"><span class="suggestion-icon mint">⌘</span><span><b>梳理流程</b><small>文档里提到的关键流程是什么？</small></span><span class="suggestion-arrow">↗</span></button><button class="suggestion" data-question="不同文档对这个主题有什么不同观点？"><span class="suggestion-icon peach">◌</span><span><b>跨文档比较</b><small>比较不同资料对同一主题的观点</small></span><span class="suggestion-arrow">↗</span></button></div><form class="ask-input" id="ask-form"><textarea id="question" placeholder="例如：这几份资料对系统架构有哪些共同结论？" rows="3" required></textarea><div class="input-bottom"><span>回答仅依据知识库检索到的证据</span><button type="submit" aria-label="发送问题" title="发送问题">↑</button></div></form><div class="answer-box" id="answer-box" hidden><div class="answer-label"><span>✦</span> 知序回答</div><div id="answer-text"></div><div id="citation-list"></div></div></article><aside class="panel ask-side"><div class="ask-side-icon">◈</div><div class="section-kicker">ANSWER WITH SOURCES</div><h2>有依据，才可信</h2><p>知序先检索你的资料，再组织回答。点击答案中的来源标签，可以回到具体文档页与原文摘录。</p><div class="ask-side-rule"></div><div class="ask-side-stat"><span>知识库文档</span><b id="ask-doc-count">0</b></div><a href="#library" class="outline-button">管理我的文档 <span>↗</span></a></aside></div>
+      <section class="app-page chat-page" id="page-ask" data-page="ask">
+        <div class="page-intro chat-page-intro"><div><div class="section-kicker">YOUR DOCUMENT ASSISTANT</div><h1>智能问答</h1><p>在资料中寻找答案，让每一条结论都有出处。</p></div><div class="chat-privacy"><i></i> 本地会话记录</div></div>
+        <div class="chat-workspace">
+          <aside class="session-rail"><div class="session-rail-head"><div><b>会话</b><small>仅保存在本机</small></div><button id="new-chat" class="new-chat-button" type="button" aria-label="新建对话" title="新建对话">＋</button></div><div class="conversation-list" id="conversation-list"></div><div class="session-rail-foot"><span class="session-lock">◈</span> 会话与引用记录保存在本地</div></aside>
+          <section class="chat-main"><header class="chat-header"><div class="chat-assistant-avatar">知</div><div><b id="active-conversation-title">新对话</b><small><i></i> 知序文档助手 · DeepSeek Flash</small></div><button class="chat-clear-button" id="chat-clear" type="button" title="清空当前会话内容" aria-label="清空当前会话内容">↻</button></header><div class="chat-scroll" id="chat-scroll"><div class="chat-welcome" id="chat-welcome"><div class="chat-welcome-symbol">✳</div><h2>从你的资料开始提问</h2><p>我会检索你的文档并整理答案，来源证据会显示在右侧。</p><div class="chat-suggestions"><button class="suggestion" data-question="帮我总结最近添加的文档"><span class="suggestion-icon lilac">✧</span><span><b>总结重点</b><small>帮我总结最近添加的文档</small></span><span class="suggestion-arrow">↗</span></button><button class="suggestion" data-question="文档里提到的关键流程是什么？"><span class="suggestion-icon mint">⌘</span><span><b>梳理流程</b><small>文档里提到的关键流程是什么？</small></span><span class="suggestion-arrow">↗</span></button><button class="suggestion" data-question="不同文档对这个主题有什么不同观点？"><span class="suggestion-icon peach">◌</span><span><b>跨文档比较</b><small>比较不同资料对同一主题的观点</small></span><span class="suggestion-arrow">↗</span></button></div><a class="chat-add-doc-link" href="#library">先添加文档 <span>↗</span></a></div><div class="chat-thread" id="chat-thread"></div></div><form class="ask-input chat-composer" id="ask-form"><textarea id="question" placeholder="向你的文档提问……" rows="2" required></textarea><div class="input-bottom"><span>Enter 发送 · Shift + Enter 换行</span><button type="submit" aria-label="发送问题" title="发送问题">↑</button></div></form></section>
+          <aside class="evidence-panel"><div class="evidence-heading"><div class="evidence-heading-icon">⌕</div><div><b>检索证据</b><small id="evidence-subtitle">回答来源会显示在这里</small></div></div><div class="evidence-list" id="evidence-list"><div class="evidence-empty"><span>◌</span><b>等待提问</b><p>提交问题后，这里会展示本轮命中的文档片段、页码和相关图片。</p></div></div><div class="evidence-foot"><i></i> 依据当前问题检索 · 本地索引</div></aside>
+        </div>
       </section>
 
       <section class="app-page" id="page-retrieval" data-page="retrieval">
@@ -67,6 +74,6 @@
   <div class="toast" id="toast" role="status"></div>
   <dialog class="document-dialog" id="document-dialog"><div class="dialog-heading"><div><div class="section-kicker">DOCUMENT DETAILS</div><h2 id="dialog-title">文档内容</h2></div><button class="dialog-close" id="dialog-close" aria-label="关闭" type="button">×</button></div><div class="document-preview" id="document-preview"></div><div class="image-gallery" id="image-gallery"></div></dialog>
   <dialog class="settings-dialog" id="settings-dialog"><div class="dialog-heading"><div><div class="section-kicker">LOCAL CONFIGURATION</div><h2>系统设置</h2></div><button class="dialog-close" id="settings-close" aria-label="关闭" type="button">×</button></div><div class="settings-content" id="settings-content">正在读取配置…</div><p class="settings-note">密钥不会显示在页面中。要调整模型、目录或本地检索开关，请编辑项目根目录的 <code>.env</code>，修改后重启服务。</p></dialog>
-  <script src="/static/app.js?v=20261024-4"></script>
+  <script src="/static/app.js?v=20261024-7"></script>
 </body>
 </html>
